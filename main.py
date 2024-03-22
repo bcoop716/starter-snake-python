@@ -88,7 +88,7 @@ def move(game_state: typing.Dict) -> typing.Dict:
         my_body = game_state['you']['body']
 
     # Iterates through each segment of the snake body
-    for body_segment in my_body[1:]:
+    for body_segment in my_body[1]:
 
         # Check if moving up would cause collision
         if my_head["x"] == body_segment["x"] and my_head["y"] + 1 == body_segment["y"]:
