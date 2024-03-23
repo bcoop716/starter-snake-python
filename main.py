@@ -40,10 +40,7 @@ def end(game_state: typing.Dict):
     print("GAME OVER\n")
 
 
-# move is called on every turn and returns your next move
-# Valid moves are "up", "down", "left", or "right"
-# See https://docs.battlesnake.com/api/example-move for available data
-def move(game_state: typing.Dict) -> typing.Dict:
+def get_possible_moves(game_state: typing.Dict):
 
     is_move_safe = {"up": True, "down": True, "left": True, "right": True}
 
@@ -110,16 +107,16 @@ def move(game_state: typing.Dict) -> typing.Dict:
     opponents = game_state['board']['snakes']
     for snake in opponents:
         for body_segment in snake['body']:
-            #collision moving up
+            # collision moving up
             if my_head["x"] == body_segment["x"] and my_head["y"] + 1 == body_segment["y"]:
                 is_move_safe["up"] = False
-            #collision moving down
-            if my_head["x"] == body_segment["x"] and my_head["y"] - 1  == body_segment["y"]:
+            # collision moving down
+            if my_head["x"] == body_segment["x"] and my_head["y"] - 1 == body_segment["y"]:
                 is_move_safe["down"] = False
-            #collision moving left
+            # collision moving left
             if my_head["x"] - 1 == body_segment["x"] and my_head["y"] == body_segment["y"]:
                 is_move_safe["left"] = False
-            #collision moving right
+            # collision moving right
             if my_head["x"] + 1 == body_segment["x"] and my_head["y"] == body_segment["y"]:
                 is_move_safe["right"] = False
 
@@ -129,43 +126,123 @@ def move(game_state: typing.Dict) -> typing.Dict:
         if isSafe:
             safe_moves.append(move)
 
-    if len(safe_moves) == 0:
-        print(f"MOVE {game_state['turn']}: No safe moves detected! Moving down")
-        return {"move": "down"}
+    return safe_moves
 
-    # Choose a random move from the safe ones
-    next_move = random.choice(safe_moves)
 
-    # TODO: Step 4 - Move towards food instead of random, to regain health and survive longer
-    food = game_state['board']['food']
+def is_terminal_state(game_state: typing.Dict):
+    if len(get_possible_moves(game_state)) == 0:
+        return True
+    else:
+        return False
 
-    # Calculate the distance between two points
-    def distance(point1, point2):
-        return abs(point1['x'] - point2['x']) + abs(point1['y'] - point2['y'])
-    
-    # Calculate the distance from the head to the closest food
-    closest_food = food[0] # Set the closest food to the first food item
-    closest_food_distance = distance(my_head, closest_food) # Set the closest food distance to the distance from the head to the first food item
 
+def evaluate(game_state):
+    my_snake = game_state['you']
+    my_head = my_snake['body'][0]
+    board = game_state['board']
+    snakes = board['snakes']
+    food = board['food']
+
+    # Define weights for different factors affecting the evaluation
+    snake_length_weight = 1
+    food_weight = 2
+    danger_weight = -5
+
+    # Score based on snake length (longer snake is generally better)
+    score = len(my_snake['body']) * snake_length_weight
+
+    # Score based on proximity to food
+    closest_food_distance = float('inf')
     for food_item in food:
-        food_distance = distance(my_head, food_item) # Calculate the distance from the head to the food
-        if food_distance < closest_food_distance: # If the distance is less than the current closest food
-            closest_food = food_item # Set the closest food to the current food
-            closest_food_distance = food_distance # Set the closest food distance to the current food distance
+        distance_to_food = abs(
+            my_head['x'] - food_item['x']) + abs(my_head['y'] - food_item['y'])
+        closest_food_distance = min(closest_food_distance, distance_to_food)
+    # Add 1 to avoid division by zero
+    score += food_weight / (closest_food_distance + 1)
 
-    # Move towards the closest food
-    if closest_food['x'] > my_head['x'] and 'right' in safe_moves: # If the closest food is to the right and moving right is safe
-        next_move = 'right' # Move right
-    elif closest_food['x'] < my_head['x'] and 'left' in safe_moves: # If the closest food is to the left and moving left is safe
-        next_move = 'left' # Move left
-    elif closest_food['y'] > my_head['y'] and 'up' in safe_moves: # If the closest food is above and moving up is safe
-        next_move = 'up' # Move up
-    elif closest_food['y'] < my_head['y'] and 'down' in safe_moves: # If the closest food is below and moving down is safe
-        next_move = 'down' # Move down
-    
+    # Score based on proximity to other snakes (avoidance of danger)
+    for snake in snakes:
+        if snake['id'] != my_snake['id']:  # Exclude own snake
+            for body_segment in snake['body']:
+                distance_to_snake = abs(
+                    my_head['x'] - body_segment['x']) + abs(my_head['y'] - body_segment['y'])
+                if distance_to_snake == 1:  # Immediate danger
+                    score += danger_weight
+    return score
+
+
+def simulate_move(game_state, move):
+    new_state = game_state
+    # Update the position of snake's head based on the move
+    head = new_state['you']['body'][0]
+    if move == "up":
+        head['y'] += 1
+    elif move == "down":
+        head['y'] -= 1
+    elif move == "left":
+        head['x'] -= 1
+    elif move == "right":
+        head['x'] += 1
+    # Check for collisions with food and update snake's length and health
+    for food in new_state['board']['food']:
+        if head['x'] == food['x'] and head['y'] == food['y']:
+            # Remove the consumed food
+            new_state['board']['food'].remove(food)
+            # Increase snake's length and health
+            new_state['you']['length'] += 1
+            new_state['you']['health'] = min(
+                100, new_state['you']['health']+25)  # increase health
+    # Check for collisions with other snakes
+    for snake in new_state['board']['snakes']:
+        if snake['id'] != new_state['you']['id']:
+            for segment in snake['body']:
+                if head['x'] == segment['x'] and head['y'] == segment['y']:
+                    new_state['you']['health'] = 0  # snake death
+    if new_state['you']['length'] > 1:
+        new_state['you']['body'] = [head] + new_state['you']['body'][:1]
+    else:
+        new_state['you']['body'] = [head]
+    return new_state
+
+
+def minimax(game_state, depth, maximizing_player):
+    if depth == 0 or is_terminal_state(game_state):
+        return evaluate(game_state), None
+
+    if maximizing_player:
+        best_value = float("-inf")
+        best_move = None
+        for move_option in get_possible_moves(game_state):
+            new_state = simulate_move(game_state, move_option)
+            value = minimax(new_state, depth - 1, False)[0]
+            if value > best_value:
+                best_value = value
+                best_move = move_option
+        return best_value, best_move
+    else:
+        best_value = float("inf")
+        best_move = None
+        for move_option in get_possible_moves(game_state):
+            new_state = simulate_move(game_state, move_option)
+            value = minimax(new_state, depth - 1, True)[0]
+            if value < best_value:
+                best_value = value
+                best_move = move_option
+        return best_value, best_move
+
+
+# move is called on every turn and returns your next move
+# Valid moves are "up", "down", "left", or "right"
+# See https://docs.battlesnake.com/api/example-move for available data
+
+
+def move(game_state: typing.Dict) -> typing.Dict:
+
+    next_move = minimax(game_state, 3, True)[1]
 
     print(f"MOVE {game_state['turn']}: {next_move}")
     return {"move": next_move}
+
 
 # Start server when `python main.py` is run
 if __name__ == "__main__":
